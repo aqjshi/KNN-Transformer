@@ -1,16 +1,13 @@
 # KNN-Transformer Model
 
-This repository implements a deep learning model using transformers for voxel data classification tasks. The model preprocesses voxel data, trains on it, and performs evaluation and visualization of results.
+This repository implements a deep learning model combining K-Nearest Neighbor (KNN) attention with transformers for voxel data classification tasks. The model preprocesses voxel data, trains on it, and performs evaluation and visualization of results.
 
 ## Features
 - Preprocess voxel data with different classification tasks.
-- Train a transformer model with patch embeddings and positional encoding.
+- Utilize K-Nearest Neighbor attention to enhance feature extraction based on 3D spatial coordinates.
+- Train a transformer model with KNN-based attention and positional encoding.
 - Evaluate model performance using F1 score and confusion matrix.
 - Visualize model predictions and confusion matrix.
-
-## Directory Structure
-
-
 
 ## Classification Tasks
 You can choose from the following classification tasks:
@@ -32,6 +29,7 @@ Clone this repository and install the dependencies:
 git clone https://github.com/aqjshi/KNN-Transformer.git
 cd KNN-Transformer
 pip install -r requirements.txt
+
 ```
 
 ## Run KNN Transformer
