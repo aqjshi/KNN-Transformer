@@ -3,12 +3,15 @@
 import numpy as np
 import pandas as pd
 import re
-from rdkit import Chem
-import pubchempy as pcp
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import f1_score
 import re
+
+
+
+
+
 
 def read_data(filename):
     data = np.load(filename, allow_pickle=True)
@@ -18,6 +21,14 @@ def read_data(filename):
 def npy_preprocessor(filename):
     df = read_data(filename)
     return df['index'].values, df['inchi'].values, df['xyz'].values, df['chiral_centers'].values, df['rotation'].values
+
+
+
+
+
+
+
+
 
 def filter_data(index_array, xyz_arrays, chiral_centers_array, rotation_array, task):
     if task == 1:
@@ -114,40 +125,58 @@ def rotate_xyz(xyz, angles):
     
     return rotated_xyz
             
+def reflect_wrt_plane(xyz, plane_normal=[0, 0, 1]):
+    # Normalize the plane normal vector to ensure it's a unit vector
+    plane_normal = plane_normal / np.linalg.norm(plane_normal)
+    
+    # Calculate the distance of each point to the plane along the normal
+    d = np.dot(xyz, plane_normal)  # Projects xyz onto the normal
 
-def augment_dataset(xyz_array, label_array,rotation_angles=[(30, 45, 60)]):
-    """Augment the dataset by applying rotation and concatenating it with the original dataset."""
+    # Reflect each point by moving it twice the distance from the plane
+    reflected_xyz = xyz - 2 * np.outer(d, plane_normal)
+    
+    return reflected_xyz
+
+def augment_dataset(xyz_array, label_array, rotation_angles=[(30, 45, 60), (45, 60, 75)], task=0):
+    """
+    Augment the dataset by applying rotation and concatenating it with the original dataset.
+    
+    Parameters:
+    - xyz_array: Array of shape (num_samples, n_atoms, features).
+    - label_array: Labels corresponding to xyz_array.
+    - rotation_angles: List of tuples for rotation angles to apply.
+    - task: Specifies additional augmentation, e.g., reflection.
+    
+    Returns:
+    - Augmented xyz data and labels.
+    """
     augmented_xyz = []
     augmented_labels = []
 
-    # For each molecule, apply the rotation
+    # For each molecule, apply rotation
     for i, xyz in enumerate(xyz_array):
         augmented_xyz.append(xyz)  # Original data
         augmented_labels.append(label_array[i])  # Original label
         
-        # Apply rotation and append rotated data
-        for angles in rotation_angles:
-            rotated_xyz = rotate_xyz(xyz[:, :3], angles)  # Rotate only the xyz coordinates (first 3 columns)
-            rotated_data = np.hstack([rotated_xyz, xyz[:, 3:]])  # Concatenate rotated xyz with one-hot encoding
-            augmented_xyz.append(rotated_data)
-            augmented_labels.append(label_array[i])  # Same label as the original
-        
+        # Apply each rotation
+        # for angles in rotation_angles:
+        #     rotated_xyz = rotate_xyz(xyz[:, :3], angles)  # Rotate only xyz coordinates
+        #     rotated_data = np.concatenate([rotated_xyz, xyz[:, 3:]], axis=1)  # Concatenate rotated xyz with features
+        #     augmented_xyz.append(rotated_data)
+        #     augmented_labels.append(label_array[i])  # Label remains the same
+
+        # # If task is 4, apply reflection
+        # if task == 4:
+        #     # Reflect the last rotated data
+        #     reflected_xyz = reflect_wrt_plane(rotated_xyz)  # Reflect xyz coordinates
+        #     reflected_data = np.concatenate([reflected_xyz, xyz[:, 3:]], axis=1)  # Concatenate with original features
+        #     augmented_xyz.append(reflected_data)
+        #     augmented_labels.append(1 - label_array[i])  # Label change if needed for task 4
+
     return np.array(augmented_xyz), np.array(augmented_labels)
 
-def augment_1d(xyz_array, label_array, n_atoms=27, rotation_angles=[(30, 45, 60)]):
-    """
-    Augment the dataset by applying rotation to a flattened 1D array and concatenating it with the original dataset.
-    
-    Parameters:
-    - xyz_array: Input array of flattened xyz coordinates and atom features.
-    - label_array: Labels corresponding to the xyz_array.
-    - n_atoms: Number of atoms (used to reshape the flattened array).
-    - rotation_angles: List of tuples representing rotation angles (in degrees) for x, y, z axes.
-    
-    Returns:
-    - augmented_xyz: Augmented dataset with original and rotated data (flattened).
-    - augmented_labels: Labels for the augmented data.
-    """
+
+def augment_1d(xyz_array, label_array, n_atoms=27, rotation_angles=[(30, 45, 60)], task=0):
     augmented_xyz = []
     augmented_labels = []
     
@@ -169,6 +198,14 @@ def augment_1d(xyz_array, label_array, n_atoms=27, rotation_angles=[(30, 45, 60)
             rotated_data_flat = rotated_data.flatten()  # Flatten back to 1D
             augmented_xyz.append(rotated_data_flat)
             augmented_labels.append(label_array[i])  # Same label as the original
+
+        if task == 4:
+            reflected_xyz = reflect_wrt_plane(rotated_xyz)
+            reflected_data = np.hstack([reflected_xyz, xyz_reshaped[:, 3:]])
+            reflected_data_flat = reflected_data.flatten()
+            augmented_xyz.append(reflected_data_flat)
+            augmented_labels.append(1 - label_array[i])
+
     
     return np.array(augmented_xyz), np.array(augmented_labels)
 
