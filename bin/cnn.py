@@ -95,6 +95,7 @@ def generate_label(index_array, xyz_arrays, chiral_centers_array, rotation_array
             for chiral_centers in chiral_centers_array
         ]
 
+    
     # Task 4 or Task 5: Binary classification based on posneg value in rotation_array
     elif task == 4 or task == 5:
         return [1 if posneg[0] > 0 else 0 for posneg in rotation_array]
@@ -136,15 +137,27 @@ def split_data(index_array, xyz_arrays, chiral_centers_array, rotation_array):
     return subset(train_idx), subset(val_idx), subset(test_idx)
 
 def normalize_xyz_train(xyz_arrays):
-    x_array = np.array([xyz[:,0] for xyz in xyz_arrays])
-    y_array = np.array([xyz[:,1] for xyz in xyz_arrays])
-    z_array = np.array([xyz[:,2] for xyz in xyz_arrays])
-    min_val = min(np.min(x_array), np.min(y_array), np.min(z_array))
-    max_val = max(np.max(x_array), np.max(y_array), np.max(z_array))
-    return min_val, max_val, [((xyz[:,:3]-min_val)/(max_val-min_val)) for xyz in xyz_arrays]
+    # xyz_arrays: list of arrays each with shape (27, 8)
+    # Normalize only columns 0,1,2 globally
+    all_xyz = np.concatenate([xyz[:, :3] for xyz in xyz_arrays], axis=0) 
+    min_val = all_xyz.min()
+    max_val = all_xyz.max()
+
+    norm_xyz = []
+    for xyz in xyz_arrays:
+        xyz_copy = xyz.copy()
+        xyz_copy[:, :3] = (xyz_copy[:, :3] - min_val) / (max_val - min_val)
+        norm_xyz.append(xyz_copy)
+    return min_val, max_val, norm_xyz
 
 def apply_normalization(xyz_arrays, min_val, max_val):
-    return [((xyz[:,:3]-min_val)/(max_val-min_val)) for xyz in xyz_arrays]
+    norm_xyz = []
+    for xyz in xyz_arrays:
+        xyz_copy = xyz.copy()
+        xyz_copy[:, :3] = (xyz_copy[:, :3] - min_val) / (max_val - min_val)
+        norm_xyz.append(xyz_copy)
+    return norm_xyz
+
 
 def augment_dataset(index_array, xyz_arrays, chiral_centers_array, rotation_array, label_array, task):
     aug_idx, aug_xyz, aug_chiral, aug_rot, aug_label = list(index_array), list(xyz_arrays), list(chiral_centers_array), list(rotation_array), list(label_array)
@@ -162,29 +175,44 @@ def augment_dataset(index_array, xyz_arrays, chiral_centers_array, rotation_arra
             aug_label.append(reflected_label)
     return aug_idx, aug_xyz, aug_chiral, aug_rot, aug_label
 
-# take in argument from shell task
-task = int(sys.argv[1])
+# Define device
+device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
-# Neural Network Model
-class FFNN(nn.Module):
-    def __init__(self, input_size, hidden_size, output_size):
-        super(FFNN, self).__init__()
-        # Move layers to the specified device
-        self.fc1 = nn.Linear(input_size, hidden_size).to(device)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(hidden_size, output_size).to(device)
-        self.device = device
+# CNN Model
+class CNN(nn.Module):
+    def __init__(self, output_size):
+        super(CNN, self).__init__()
         
+        # Assuming input shape: N x 1 x 27 x 8
+        # Conv layer 1 with padding to keep spatial size
+        self.cnn_layers = nn.Sequential(
+            nn.Conv2d(in_channels=1, out_channels=64, kernel_size=5, padding=2),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # After this: from (1,27,8) to (64, 13,4)
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=5, padding=2),
+            nn.ReLU()
+        )
+        # After first conv+pool: Height: floor(27/2)=13, Width: floor(8/2)=4
+        # Second conv keeps size the same (padding=2, kernel=5) -> (128,13,4)
+        flatten_size = 128 * 13 * 4
+
+        self.fc_layer = nn.Sequential(
+            nn.Linear(flatten_size, output_size),
+        )
+
     def forward(self, x):
-        x = self.fc1(x)
-        x = self.relu(x)
-        x = self.fc2(x)
+        x = self.cnn_layers(x)   # N,128,13,4
+        x = x.view(x.size(0), -1)
+        x = self.fc_layer(x)
         return x
 
+def weight_decay(cnn_model, l2_lambda, device):
+    _reg = 0.0
+    for param in cnn_model.parameters():
+        _reg += torch.norm(param, 2)**2
+    _reg = (l2_lambda / 2) * _reg
+    return _reg
 
-
-# Accuracy and Metrics Calculation
 def evaluate_model(model, test_loader, criterion, task, test):
     model.eval()
     all_labels = []
@@ -195,7 +223,8 @@ def evaluate_model(model, test_loader, criterion, task, test):
         for data, labels in test_loader:
             data, labels = data.to(device), labels.to(device)
 
-    
+            # Reshape to Nx1x27x8 for CNN
+            data = data.unsqueeze(1)  # Add channel dimension
 
             outputs = model(data)
 
@@ -229,41 +258,34 @@ def evaluate_model(model, test_loader, criterion, task, test):
         print(cm)
     return avg_loss, accuracy, precision, recall, f1
 
-def weight_decay(cnn_model, l2_lambda, device):
-    _reg = 0.0
-    for param in cnn_model.parameters():
-        _reg += torch.norm(param, 2)**2
-    _reg = (l2_lambda / 2) * _reg
-    return _reg
+# Parse task from command line
+task = int(sys.argv[1])
 
-# Main Training Function
+
 def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size=8, learning_rate=0.0001, l2_lambda=1e-4):
-    # Unpack and normalize data
-    train_idx, train_xyz, _, _ = train_data
-    val_idx, val_xyz, _, _ = val_data
-    test_idx, test_xyz, _, _ = test_data
+    # Unpack data
+    train_idx, train_xyz, train_chiral, train_rot = train_data
+    val_idx, val_xyz, val_chiral, val_rot = val_data
+    test_idx, test_xyz, test_chiral, test_rot = test_data
 
+    # Normalize data
     min_val, max_val, train_xyz = normalize_xyz_train(train_xyz)
     val_xyz = apply_normalization(val_xyz, min_val, max_val)
     test_xyz = apply_normalization(test_xyz, min_val, max_val)
 
-
+    train_labels_np = np.array(generate_label_array(train_idx, train_xyz, train_chiral, train_rot, task))
+    val_labels_np = np.array(generate_label_array(val_idx, val_xyz, val_chiral, val_rot, task))
+    test_labels_np = np.array(generate_label_array(test_idx, test_xyz, test_chiral, test_rot, task))
 
     # Convert to tensors
-    train_labels = torch.tensor(generate_label_array(train_idx, [], train_data[2], train_data[3], task), dtype=torch.float32)
-    val_labels = torch.tensor(generate_label_array(val_idx, [], val_data[2], val_data[3], task), dtype=torch.float32)
-    test_labels = torch.tensor(generate_label_array(test_idx, [], test_data[2], test_data[3], task), dtype=torch.float32)
-
-
     train_tensor = torch.tensor(np.array(train_xyz), dtype=torch.float32)
     val_tensor = torch.tensor(np.array(val_xyz), dtype=torch.float32)
     test_tensor = torch.tensor(np.array(test_xyz), dtype=torch.float32)
 
-
-    train_tensor = train_tensor.view(train_tensor.size(0), -1)  # Shape: (N, 27*3)
-    val_tensor = val_tensor.view(val_tensor.size(0), -1)
-    test_tensor = test_tensor.view(test_tensor.size(0), -1)
-
+    
+    train_labels = torch.tensor(train_labels_np, dtype=torch.float32 if task != 2 else torch.long)
+    val_labels = torch.tensor(val_labels_np, dtype=torch.float32 if task != 2 else torch.long)
+    test_labels = torch.tensor(test_labels_np, dtype=torch.float32 if task != 2 else torch.long)
 
     train_dataset = TensorDataset(train_tensor, train_labels)
     val_dataset = TensorDataset(val_tensor, val_labels)
@@ -273,20 +295,20 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    # Model setup
-    input_size = train_tensor.shape[1]
+    # Determine output size
     output_size = 5 if task == 2 else 1
-    model = FFNN(input_size, 256, output_size).to(device)
+    model = CNN(output_size).to(device)
 
-    criterion = nn.CrossEntropyLoss() if task == 2 else nn.BCEWithLogitsLoss()
-    
+    if task == 2:
+        criterion = nn.CrossEntropyLoss()
+    else:
+        criterion = nn.BCELoss()
+
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # Training loop
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-
         for i, (inputs, labels) in enumerate(train_loader):
             inputs, labels = inputs.to(device), labels.to(device)
 
@@ -300,20 +322,15 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
                 loss = criterion(outputs, labels)
             else:
                 outputs = torch.sigmoid(outputs)
-                outputs = outputs.view(-1)     # shape => (N,)
-                labels = labels.view(-1)       # shape => (N,)
-                loss = criterion(outputs, labels)
-                # loss = criterion(outputs.squeeze(), labels)
+                loss = criterion(outputs.squeeze(), labels)
             
+            # Add weight decay
             loss = loss + weight_decay(model, l2_lambda, device)
             
-    
-
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item()
-
 
         # Evaluation on validation data
         if epoch % 5 == 0:
@@ -332,18 +349,17 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
 
 # Load and preprocess data
 index_array, inchi_array, xyz_arrays, chiral_centers_array, rotation_array = npy_preprocessor('qm9_filtered.npy')
+
 if task == 3 or task == 4 or task == 5:
     #print distribution of labels as a ratio
     print("Distribution of Labels:")
     print(pd.Series(generate_label_array(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)).value_counts(normalize=True))
 
-# shell arg for task
-task = int(sys.argv[1])
-
 print("\nTASK:", task)
-device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
+
 filtered_index, filtered_xyz, filtered_chiral, filtered_rotation = filter_data(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)
 train_data, val_data, test_data = split_data(filtered_index, filtered_xyz, filtered_chiral, filtered_rotation)
 
-model = train_model(train_data, val_data,  test_data, num_epochs=5, task=task)
+
+model = train_model(train_data, val_data, test_data, task=task, num_epochs=100)
