@@ -180,21 +180,24 @@ device = torch.device("mps") if torch.backends.mps.is_available() else torch.dev
 
 
 class TransformerClassifier(nn.Module):
-    def __init__(self, input_size, num_heads, num_layers, hidden_size, output_size):
+    def __init__(self, input_size, num_heads, num_layers, hidden_size, output_size, dropout_rate=0.3):
         """
         input_size: number of features per token (columns)
         """
         super(TransformerClassifier, self).__init__()
         self.embedding = nn.Linear(input_size, hidden_size)
         self.positional_encoding = nn.Parameter(torch.randn(1, 100, hidden_size))
+        self.dropout_embedding = nn.Dropout((dropout_rate))
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=hidden_size,
             nhead=num_heads,
             dim_feedforward=512,
-            batch_first=True
+            batch_first=True,
+            dropout=dropout_rate
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.dropout_transformer = nn.Dropout(dropout_rate)
         self.fc_out = nn.Linear(hidden_size, output_size)
     
     def forward(self, x):
@@ -213,7 +216,12 @@ class TransformerClassifier(nn.Module):
         seq_len = x.size(1)  # number of tokens
         pos_encoding = self.positional_encoding[:, :seq_len, :]
         x = self.embedding(x) + pos_encoding
+
+
+        x = self.dropout_embedding(x)
         x = self.transformer_encoder(x)     # (N, seq_len, hidden_size)
+        x = self.dropout_transformer(x)
+
         x = torch.mean(x, dim=1)            # average pooling across seq_len
         x = self.fc_out(x)                  # final layer
         return x
@@ -311,30 +319,17 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     print("Data loaded")
 
-    # Determine output size
-    output_size = 5 if task == 2 else 1
+
         # Hyperparameters
     input_size = 8
     learning_rate = 0.0001
-    # num_epochs = 1
-
-    # # Initialize the Transformer model
-    # hidden_size = 256
-    # num_heads = 16
-    # num_layers = 2
-
-
-    num_epochs = 1
-
+    l2_lambda = 0.00001
     # Initialize the Transformer model
-    hidden_size = 1
-    num_heads = 1
-    num_layers = 1
+    hidden_size = 128   
+    num_heads = 8
+    num_layers = 4
     output_size = 5 if task == 2 else 1  # 5-class for task 2, binary otherwise
-
     # Correct: This sets input_size to the number of features per token
-
-
     model = TransformerClassifier(
         input_size=input_size,  
         num_heads=num_heads,
@@ -342,15 +337,17 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
         hidden_size=hidden_size,
         output_size=output_size
     ).to(device)
-
-    print("Model initialized")
+    
 
     if task == 2:
         criterion = nn.CrossEntropyLoss()
     else:
         criterion = nn.BCELoss()
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, betas=(.9, .999))
+
+    print("Model initialized")
+    print("Hyperparams: ", learning_rate, l2_lambda, hidden_size, num_heads, num_layers, "betas:", .9, .999)
 
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
@@ -383,7 +380,7 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
             running_loss += loss.item()
 
         # Evaluation on validation data
-        if epoch % 5 == 0:
+        if epoch % 5 == 0 and epoch > 0:
             val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(model, val_loader, criterion, task, test=False)
             test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(model, test_loader, criterion, task, test=True)
             print(f"{epoch} Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%, Precision: {test_prec:.4f}, Recall: {test_recall:.4f}, F1: {test_f1:.4f}")
@@ -414,4 +411,4 @@ print("Number of data points:", len(filtered_index))
 train_data, val_data, test_data = split_data(filtered_index, filtered_xyz, filtered_chiral, filtered_rotation)
 print("Number of training data points:", len(train_data[0]))
 
-model = train_model(train_data, val_data, test_data, task=task, num_epochs=1)
+model = train_model(train_data, val_data, test_data, task=task, num_epochs=100)
