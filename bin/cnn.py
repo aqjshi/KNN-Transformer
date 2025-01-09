@@ -322,7 +322,7 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
                 loss = criterion(outputs, labels)
             else:
                 outputs = torch.sigmoid(outputs)
-                loss = criterion(outputs.squeeze(), labels)
+                loss = criterion(outputs.squeeze(1), labels)
             
             # Add weight decay
             loss = loss + weight_decay(model, l2_lambda, device)
@@ -346,6 +346,7 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
     test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(model, test_loader, criterion, task, test=True)
     print(f"Final Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%, Precision: {test_prec:.4f}, Recall: {test_recall:.4f}, F1: {test_f1:.4f}")
     return model
+
 
 # Load and preprocess data
 index_array, inchi_array, xyz_arrays, chiral_centers_array, rotation_array = npy_preprocessor('qm9_filtered.npy')
