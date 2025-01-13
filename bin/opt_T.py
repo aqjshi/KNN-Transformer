@@ -334,7 +334,7 @@ def objective(trial):
     learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-4)
     batch_size = trial.suggest_categorical('batch_size', [8, 16])
     l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-5)
-    num_epochs = trial.suggest_int('num_epochs', 90, 100) # Increased epoch range to accommodate early stopping
+    num_epochs = trial.suggest_int('num_epochs', 120, 150) # Increased epoch range to accommodate early stopping
     num_layers = trial.suggest_int('num_layers', 2, 3)
 
     index_array, inchi_array, xyz_arrays, chiral_centers_array, rotation_array = npy_preprocessor('qm9_filtered.npy')
