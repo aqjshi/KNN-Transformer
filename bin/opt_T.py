@@ -318,6 +318,30 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
             print(f"Early stopping triggered. No improvement in validation loss for {patience} epochs.")
             break
 
+        # === Check for accuracy threshold ===
+
+        if task == 0 and val_acc < 79:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 1 and val_acc < 66:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 1 and val_acc < 66:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 2 and val_acc < 36:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 3 and val_acc < 45:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 4 and val_acc < 45:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break               
+        elif task == 5 and val_acc < 45:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break 
+
     # Final Test Evaluation
     test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(
         model, test_loader, criterion, task, test=True
@@ -331,11 +355,11 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
     return model
 
 def objective(trial):
-    learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-4)
-    batch_size = trial.suggest_categorical('batch_size', [8, 16])
-    l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-5)
+    learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-3)
+    batch_size = trial.suggest_categorical('batch_size', [8, 32])
+    l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-3)
     num_epochs = trial.suggest_int('num_epochs', 120, 150) # Increased epoch range to accommodate early stopping
-    num_layers = trial.suggest_int('num_layers', 2, 3)
+    num_layers = trial.suggest_int('num_layers', 1, 4)
 
     index_array, inchi_array, xyz_arrays, chiral_centers_array, rotation_array = npy_preprocessor('qm9_filtered.npy')
 
@@ -348,6 +372,8 @@ def objective(trial):
 
     filtered_index, filtered_xyz, filtered_chiral, filtered_rotation = filter_data(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)
     train_data, val_data, test_data = split_data(filtered_index, filtered_xyz, filtered_chiral, filtered_rotation)
+
+    print(f"Hyperparameters: num_epochs={num_epochs}, batch_size={batch_size}, learning_rate={learning_rate}, l2_lambda={l2_lambda}, num_layers={num_layers}")
 
     model = train_model(train_data, val_data, test_data, task=task, num_epochs=num_epochs, batch_size=batch_size,
                         learning_rate=learning_rate, l2_lambda=l2_lambda, num_layers=num_layers)
@@ -365,7 +391,7 @@ def objective(trial):
     return -val_accuracy
 
 study = optuna.create_study(direction='minimize')
-study.optimize(objective, n_trials=50)
+study.optimize(objective, n_trials=80)
 
 print("Best trial:")
 print(f"Value (F1): {-study.best_trial.value}")
