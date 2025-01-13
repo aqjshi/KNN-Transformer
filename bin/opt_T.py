@@ -332,10 +332,10 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
 
 def objective(trial):
     learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-4)
-    batch_size = trial.suggest_categorical('batch_size', [8, 16])
+    batch_size = trial.suggest_categorical('batch_size', [4, 16])
     l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-4)
     num_epochs = trial.suggest_int('num_epochs', 90, 100) # Increased epoch range to accommodate early stopping
-    num_layers = trial.suggest_int('num_layers', 1, 3)
+    num_layers = trial.suggest_int('num_layers', 2, 3)
 
     index_array, inchi_array, xyz_arrays, chiral_centers_array, rotation_array = npy_preprocessor('qm9_filtered.npy')
 
@@ -348,8 +348,6 @@ def objective(trial):
 
     filtered_index, filtered_xyz, filtered_chiral, filtered_rotation = filter_data(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)
     train_data, val_data, test_data = split_data(filtered_index, filtered_xyz, filtered_chiral, filtered_rotation)
-
-    print(f"Hyperparameters: num_epochs={num_epochs}, batch_size={batch_size}, learning_rate={learning_rate}, l2_lambda={l2_lambda}, num_layers={num_layers}")
 
     model = train_model(train_data, val_data, test_data, task=task, num_epochs=num_epochs, batch_size=batch_size,
                         learning_rate=learning_rate, l2_lambda=l2_lambda, num_layers=num_layers)
