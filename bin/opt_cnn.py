@@ -356,10 +356,10 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
     return model
 
 def objective(trial):
-    learning_rate = trial.suggest_loguniform('learning_rate', 1e-5, 1e-2)
-    batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
-    l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-2)
-    num_epochs = trial.suggest_int('num_epochs', 10, 150)
+    learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-2)
+    batch_size = trial.suggest_categorical('batch_size', [4, 16, 32])
+    l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-7, 1e-3)
+    num_epochs = trial.suggest_int('num_epochs', 120, 150)
 
     print(f"Trial Hyperparameters: learning_rate={learning_rate}, batch_size={batch_size}, l2_lambda={l2_lambda}, num_epochs={num_epochs}")
 
@@ -391,7 +391,7 @@ def objective(trial):
     return -val_accuracy
 
 study = optuna.create_study(direction='maximize')
-study.optimize(objective, n_trials=50)
+study.optimize(objective, n_trials=80)
 
 print("Best trial:")
 print(f"Value (F1): {-study.best_trial.value}")
