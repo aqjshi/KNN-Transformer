@@ -5,12 +5,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, confusion_matrix
+from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
 import torch.nn.functional as F
 import sys
-import re
-from sklearn.metrics import f1_score, precision_score, recall_score
 import optuna
+
 task = int(sys.argv[1])
 
 def read_data(filename):
@@ -18,94 +17,45 @@ def read_data(filename):
     df = pd.DataFrame(data.tolist() if data.dtype == 'O' and isinstance(data[0], dict) else data)
     return df
 
-
 def npy_preprocessor(filename):
     df = read_data(filename)
     return df['index'].values, df['inchi'].values, df['xyz'].values, df['chiral_centers'].values, df['rotation'].values
 
-
 def filter_data(index_array, xyz_arrays, chiral_centers_array, rotation_array, task):
     if task == 0:
         filtered_indices = [i for i in range(len(index_array))]
-        filtered_index_array = [index_array[i] for i in filtered_indices]
-        filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
-        filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
-        filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
-        return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
-
-    if task == 1:
-        #return only chiral_length <2
+    elif task == 1:
         filtered_indices = [i for i in range(len(index_array)) if len(chiral_centers_array[i]) < 2]
-        filtered_index_array = [index_array[i] for i in filtered_indices]
-        filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
-        filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
-        filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
-        return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
-
     elif task == 2:
-        #only return chiral legnth < 5
         filtered_indices = [i for i in range(len(index_array)) if len(chiral_centers_array[i]) < 5]
-        filtered_index_array = [index_array[i] for i in filtered_indices]
-        filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
-        filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
-        filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
-        return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
-    elif task == 3: 
-        # Step 1: Filter indices where the length of chiral_centers_array is exactly 1 and the first tuple contains 'R' or 'S'
+    elif task == 3:
         filtered_indices = [i for i in range(len(index_array)) if len(chiral_centers_array[i]) == 1 and ('R' == chiral_centers_array[i][0][1] or 'S' == chiral_centers_array[i][0][1])]
-        # Step 2: Create filtered arrays for index_array, xyz_arrays, chiral_centers_array, and rotation_array
-        filtered_index_array = [index_array[i] for i in filtered_indices]
-        filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
-        
-        filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
-        
-        # Step 5: Filter the rotation_array accordingly
-        filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
-        return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
-    
     elif task == 4:
-        # only return chiral_length == 1
         filtered_indices = [i for i in range(len(index_array)) if len(chiral_centers_array[i]) == 1]
-        filtered_index_array = [index_array[i] for i in filtered_indices]
-        filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
-        filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
-        filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
-        return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
     elif task == 5:
         filtered_indices = [i for i in range(len(index_array))]
-        filtered_index_array = [index_array[i] for i in filtered_indices]
-        filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
-        filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
-        filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
-        return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
 
+    filtered_index_array = [index_array[i] for i in filtered_indices]
+    filtered_xyz_arrays = [xyz_arrays[i] for i in filtered_indices]
+    filtered_chiral_centers_array = [chiral_centers_array[i] for i in filtered_indices]
+    filtered_rotation_array = [rotation_array[i] for i in filtered_indices]
+    return filtered_index_array, filtered_xyz_arrays, filtered_chiral_centers_array, filtered_rotation_array
 
 def generate_label(index_array, xyz_arrays, chiral_centers_array, rotation_array, task):
-    # Task 0 or Task 1: Binary classification based on the presence of chiral centers
     if task == 0 or task == 1:
         return [1 if len(chiral_centers) > 0 else 0 for chiral_centers in chiral_centers_array]
-    
-    # Task 2: Return the number of chiral centers
     elif task == 2:
         return [len(chiral_centers) for chiral_centers in chiral_centers_array]
-    
-    # Task 3: Assuming that the task is to return something from chiral_centers_array, not rotation_array
     elif task == 3:
         return [
             1 if chiral_centers and len(chiral_centers[0]) > 1 and 'R' == chiral_centers[0][1] else 0
             for chiral_centers in chiral_centers_array
         ]
-
-    
-    # Task 4 or Task 5: Binary classification based on posneg value in rotation_array
     elif task == 4 or task == 5:
         return [1 if posneg[0] > 0 else 0 for posneg in rotation_array]
 
 def generate_label_array(index_array, xyz_arrays, chiral_centers_array, rotation_array, task):
-    # Fix to directly return the output of generate_label
     return generate_label(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)
-
-# 121416 item, each associated with a 27 row, 8 col matrix, apply global normalization to col 0,1,2 Rescaling data to a [0, 1]
 
 def reflect_wrt_plane(xyz, plane_normal=[0, 0, 1]):
     plane_normal = plane_normal / np.linalg.norm(plane_normal)
@@ -114,17 +64,22 @@ def reflect_wrt_plane(xyz, plane_normal=[0, 0, 1]):
 
 def rotate_xyz(xyz, angles):
     theta_x, theta_y, theta_z = np.radians(angles)
-    Rx = np.array([[1,0,0],
-                   [0,np.cos(theta_x),-np.sin(theta_x)],
-                   [0,np.sin(theta_x), np.cos(theta_x)]])
-    Ry = np.array([[ np.cos(theta_y),0,np.sin(theta_y)],
-                   [0,1,0],
-                   [-np.sin(theta_y),0,np.cos(theta_y)]])
-    Rz = np.array([[np.cos(theta_z),-np.sin(theta_z),0],
-                   [np.sin(theta_z), np.cos(theta_z),0],
-                   [0,0,1]])
+    Rx = np.array([[1, 0, 0],
+                   [0, np.cos(theta_x), -np.sin(theta_x)],
+                   [0, np.sin(theta_x), np.cos(theta_x)]])
+    Ry = np.array([[np.cos(theta_y), 0, np.sin(theta_y)],
+                   [0, 1, 0],
+                   [-np.sin(theta_y), 0, np.cos(theta_y)]])
+    Rz = np.array([[np.cos(theta_z), -np.sin(theta_z), 0],
+                   [np.sin(theta_z), np.cos(theta_z), 0],
+                   [0, 0, 1]])
     R = Rz @ Ry @ Rx
-    return np.dot(xyz, R.T)
+
+    # Apply rotation only to the spatial dimensions (first 3 columns)
+    rotated_xyz = xyz.copy()
+    rotated_xyz[:, :3] = np.dot(xyz[:, :3], R.T)
+    return rotated_xyz
+
 
 def split_data(index_array, xyz_arrays, chiral_centers_array, rotation_array):
     train_idx, test_idx = train_test_split(range(len(index_array)), test_size=0.1, random_state=42)
@@ -138,9 +93,7 @@ def split_data(index_array, xyz_arrays, chiral_centers_array, rotation_array):
     return subset(train_idx), subset(val_idx), subset(test_idx)
 
 def normalize_xyz_train(xyz_arrays):
-    # xyz_arrays: list of arrays each with shape (27, 8)
-    # Normalize only columns 0,1,2 globally
-    all_xyz = np.concatenate([xyz[:, :3] for xyz in xyz_arrays], axis=0) 
+    all_xyz = np.concatenate([xyz[:, :3] for xyz in xyz_arrays], axis=0)
     min_val = all_xyz.min()
     max_val = all_xyz.max()
 
@@ -159,24 +112,44 @@ def apply_normalization(xyz_arrays, min_val, max_val):
         norm_xyz.append(xyz_copy)
     return norm_xyz
 
+# Updated Augmentation Functions
+def add_noise(xyz_arrays, noise_level=0.05):
+    noisy_xyz = []
+    for xyz in xyz_arrays:
+        noise = np.random.normal(0, noise_level, xyz[:, :3].shape)
+        xyz_copy = xyz.copy()
+        xyz_copy[:, :3] += noise
+        noisy_xyz.append(xyz_copy)
+    return noisy_xyz
+
+def rotate_molecules(xyz_arrays):
+    rotated_xyz = []
+    for xyz in xyz_arrays:
+        angles = np.random.uniform(0, 360, 3)  # Random angles for rotation
+        rotated_xyz.append(rotate_xyz(xyz.copy(), angles))
+    return rotated_xyz
 
 def augment_dataset(index_array, xyz_arrays, chiral_centers_array, rotation_array, label_array, task):
     aug_idx, aug_xyz, aug_chiral, aug_rot, aug_label = list(index_array), list(xyz_arrays), list(chiral_centers_array), list(rotation_array), list(label_array)
-    for i in range(len(index_array)):
-        if len(chiral_centers_array[i]) == 1:
-            reflected_xyz = xyz_arrays[i].copy()
-            reflected_xyz[:, :3] = reflect_wrt_plane(xyz_arrays[i][:, :3], [0,0,1])
-            reflected_label = label_array[i]
-            if task == 3: reflected_label = 1 - reflected_label
-            elif task in [4,5]: reflected_label = -reflected_label
-            aug_idx.append(index_array[i])
-            aug_xyz.append(reflected_xyz)
-            aug_chiral.append(chiral_centers_array[i])
-            aug_rot.append(rotation_array[i])
-            aug_label.append(reflected_label)
+
+    # Add noise to xyz data
+    noisy_xyz = add_noise(xyz_arrays)
+    aug_idx.extend(index_array)
+    aug_xyz.extend(noisy_xyz)
+    aug_chiral.extend(chiral_centers_array)
+    aug_rot.extend(rotation_array)
+    aug_label.extend(label_array)
+
+    # Rotate molecules
+    rotated_xyz = rotate_molecules(xyz_arrays)
+    aug_idx.extend(index_array)
+    aug_xyz.extend(rotated_xyz)
+    aug_chiral.extend(chiral_centers_array)
+    aug_rot.extend(rotation_array)
+    aug_label.extend(label_array)
+
     return aug_idx, aug_xyz, aug_chiral, aug_rot, aug_label
 
-# Define device
 device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # CNN Model
@@ -207,9 +180,9 @@ class CNN(nn.Module):
         x = self.fc_layer(x)
         return x
 
-def weight_decay(cnn_model, l2_lambda, device):
+def weight_decay(model, l2_lambda, device):
     _reg = 0.0
-    for param in cnn_model.parameters():
+    for param in model.parameters():
         _reg += torch.norm(param, 2)**2
     _reg = (l2_lambda / 2) * _reg
     return _reg
@@ -259,55 +232,41 @@ def evaluate_model(model, test_loader, criterion, task, test):
         print(cm)
     return avg_loss, accuracy, precision, recall, f1
 
-# Parse task from command line
-task = int(sys.argv[1])
-
-
-def train_model(
-    train_data, 
-    val_data, 
-    test_data, 
-    task, 
-    num_epochs=50, 
-    batch_size=8, 
-    learning_rate=0.00001, 
-    l2_lambda=1e-4,
-    patience=5,           # Number of epochs with no improvement to wait
-    min_delta=1e-4        # Minimum improvement to be considered as "progress"
-):
-    # Unpack data
+def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size=8, learning_rate=0.00001, l2_lambda=1e-4):
     train_idx, train_xyz, train_chiral, train_rot = train_data
     val_idx, val_xyz, val_chiral, val_rot = val_data
     test_idx, test_xyz, test_chiral, test_rot = test_data
 
-    # Normalize data
+    # Augment training data
+    train_idx, train_xyz, train_chiral, train_rot, train_labels_np = augment_dataset(
+        train_idx, train_xyz, train_chiral, train_rot, 
+        generate_label_array(train_idx, train_xyz, train_chiral, train_rot, task), task
+    )
+
     min_val, max_val, train_xyz = normalize_xyz_train(train_xyz)
     val_xyz = apply_normalization(val_xyz, min_val, max_val)
     test_xyz = apply_normalization(test_xyz, min_val, max_val)
 
-    train_labels_np = np.array(generate_label_array(train_idx, train_xyz, train_chiral, train_rot, task))
-    val_labels_np   = np.array(generate_label_array(val_idx,   val_xyz,   val_chiral,   val_rot,   task))
-    test_labels_np  = np.array(generate_label_array(test_idx,  test_xyz,  test_chiral,  test_rot,  task))
+    #train_labels_np = np.array(generate_label_array(train_idx, train_xyz, train_chiral, train_rot, task))
+    val_labels_np = np.array(generate_label_array(val_idx, val_xyz, val_chiral, val_rot, task))
+    test_labels_np = np.array(generate_label_array(test_idx, test_xyz, test_chiral, test_rot, task))
 
-    # Convert to tensors
     train_tensor = torch.tensor(np.array(train_xyz), dtype=torch.float32)
-    val_tensor   = torch.tensor(np.array(val_xyz),   dtype=torch.float32)
-    test_tensor  = torch.tensor(np.array(test_xyz),  dtype=torch.float32)
+    val_tensor = torch.tensor(np.array(val_xyz), dtype=torch.float32)
+    test_tensor = torch.tensor(np.array(test_xyz), dtype=torch.float32)
 
-    # For task != 2, labels are float; for task == 2, labels are long (classification w/ CrossEntropy)
     train_labels = torch.tensor(train_labels_np, dtype=torch.float32 if task != 2 else torch.long)
-    val_labels   = torch.tensor(val_labels_np,   dtype=torch.float32 if task != 2 else torch.long)
-    test_labels  = torch.tensor(test_labels_np,  dtype=torch.float32 if task != 2 else torch.long)
+    val_labels = torch.tensor(val_labels_np, dtype=torch.float32 if task != 2 else torch.long)
+    test_labels = torch.tensor(test_labels_np, dtype=torch.float32 if task != 2 else torch.long)
 
     train_dataset = TensorDataset(train_tensor, train_labels)
-    val_dataset   = TensorDataset(val_tensor,   val_labels)
-    test_dataset  = TensorDataset(test_tensor,  test_labels)
+    val_dataset = TensorDataset(val_tensor, val_labels)
+    test_dataset = TensorDataset(test_tensor, test_labels)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False)
-    test_loader  = DataLoader(test_dataset,  batch_size=batch_size, shuffle=False)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
-    # Determine output size
     output_size = 5 if task == 2 else 1
     model = CNN(output_size).to(device)
 
@@ -318,17 +277,18 @@ def train_model(
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # === Early Stopping Setup ===
-    best_val_loss = float('inf')  # Initialize with a large value
-    patience_counter = 0          # Counts how many epochs with no improvement
+    # Early stopping variables
+    best_val_loss = float('inf')
+    patience = 10  # Number of epochs to wait for improvement
+    min_delta = 0.001  # Minimum improvement required to consider it as improvement
+    patience_counter = 0
 
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-
         for i, (inputs, labels) in enumerate(train_loader):
             inputs, labels = inputs.to(device), labels.to(device)
-            inputs = inputs.unsqueeze(1)  # Reshape for CNN
+            inputs = inputs.unsqueeze(1)
 
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -339,63 +299,73 @@ def train_model(
                 outputs = torch.sigmoid(outputs)
                 loss = criterion(outputs.squeeze(1), labels)
 
-            # Add weight decay
             loss = loss + weight_decay(model, l2_lambda, device)
-
             loss.backward()
             optimizer.step()
+
             running_loss += loss.item()
 
-        # Evaluate on validation set
-        val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(
-            model, val_loader, criterion, task, test=False
-        )
+        if epoch % 5 == 0:
+            val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(model, val_loader, criterion, task, test=False)
+            test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(model, test_loader, criterion, task, test=True)
+            print(f"{epoch} Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%, Precision: {test_prec:.4f}, Recall: {test_recall:.4f}, F1: {test_f1:.4f}")
+        else:
+            val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(model, val_loader, criterion, task, test=False)
 
         # Print progress
         print(f"Epoch [{epoch+1}/{num_epochs}], "
               f"Train Loss: {running_loss/len(train_loader):.4f}, "
               f"Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}, Val Acc: {val_acc:.2f}%")
 
-        # === Check improvement for early stopping ===
-        # Compare new val_loss with the previous best_val_loss
+        # Check for early stopping
         if val_loss < best_val_loss - min_delta:
-            # There's an improvement
             best_val_loss = val_loss
             patience_counter = 0
         else:
-            # No meaningful improvement
             patience_counter += 1
 
         if patience_counter >= patience:
             print(f"Early stopping triggered. No improvement in validation loss for {patience} epochs.")
             break
 
-    # Final Test Evaluation
-    test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(
-        model, test_loader, criterion, task, test=True
-    )
-    print(f"Final Test Loss: {test_loss:.4f}, "
-          f"Accuracy: {test_acc:.2f}%, "
-          f"Precision: {test_prec:.4f}, "
-          f"Recall: {test_recall:.4f}, "
-          f"F1: {test_f1:.4f}")
+        if task == 0 and val_acc < 79:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 1 and val_acc < 66:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 1 and val_acc < 66:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 2 and val_acc < 36:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 3 and val_acc < 45:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break
+        elif task == 4 and val_acc < 45:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break               
+        elif task == 5 and val_acc < 45:
+            print(f"Training stopped due to low accuracy: {val_acc:.2f}%")
+            break 
 
+
+    test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(model, test_loader, criterion, task, test=True)
+    print(f"Final Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%, Precision: {test_prec:.4f}, Recall: {test_recall:.4f}, F1: {test_f1:.4f}")
     return model
 
-
-
-# Optuna objective function
 def objective(trial):
     learning_rate = trial.suggest_loguniform('learning_rate', 1e-5, 1e-2)
     batch_size = trial.suggest_categorical('batch_size', [8, 16, 32])
     l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-2)
-    num_epochs = trial.suggest_int('num_epochs', 10, 50)
+    num_epochs = trial.suggest_int('num_epochs', 10, 150)
 
-    # Load and preprocess data
+    print(f"Trial Hyperparameters: learning_rate={learning_rate}, batch_size={batch_size}, l2_lambda={l2_lambda}, num_epochs={num_epochs}")
+
     index_array, inchi_array, xyz_arrays, chiral_centers_array, rotation_array = npy_preprocessor('qm9_filtered.npy')
 
     if task == 3 or task == 4 or task == 5:
-        #print distribution of labels as a ratio
         print("Distribution of Labels:")
         print(pd.Series(generate_label_array(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)).value_counts(normalize=True))
 
@@ -418,9 +388,8 @@ def objective(trial):
     criterion = nn.BCELoss()
     _, val_accuracy, _, _, val_f1 = evaluate_model(model, val_loader, criterion, task=0, test=False)
 
-    return -val_accuracy  # Maximize F1 by minimizing its negative
+    return -val_accuracy
 
-# Run Optuna
 study = optuna.create_study(direction='maximize')
 study.optimize(objective, n_trials=50)
 
