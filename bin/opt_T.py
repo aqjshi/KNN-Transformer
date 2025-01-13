@@ -349,6 +349,8 @@ def objective(trial):
     filtered_index, filtered_xyz, filtered_chiral, filtered_rotation = filter_data(index_array, xyz_arrays, chiral_centers_array, rotation_array, task)
     train_data, val_data, test_data = split_data(filtered_index, filtered_xyz, filtered_chiral, filtered_rotation)
 
+    print(f"Hyperparameters: num_epochs={num_epochs}, batch_size={batch_size}, learning_rate={learning_rate}, l2_lambda={l2_lambda}, num_layers={num_layers}")
+
     model = train_model(train_data, val_data, test_data, task=task, num_epochs=num_epochs, batch_size=batch_size,
                         learning_rate=learning_rate, l2_lambda=l2_lambda, num_layers=num_layers)
 
