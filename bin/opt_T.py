@@ -332,8 +332,8 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
 
 def objective(trial):
     learning_rate = trial.suggest_loguniform('learning_rate', 1e-6, 1e-4)
-    batch_size = trial.suggest_categorical('batch_size', [4, 16])
-    l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-4)
+    batch_size = trial.suggest_categorical('batch_size', [8, 16])
+    l2_lambda = trial.suggest_loguniform('l2_lambda', 1e-6, 1e-5)
     num_epochs = trial.suggest_int('num_epochs', 90, 100) # Increased epoch range to accommodate early stopping
     num_layers = trial.suggest_int('num_layers', 2, 3)
 
