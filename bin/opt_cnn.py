@@ -388,7 +388,7 @@ def objective(trial):
     criterion = nn.BCELoss()
     _, val_accuracy, _, _, val_f1 = evaluate_model(model, val_loader, criterion, task=0, test=False)
 
-    return -val_accuracy
+    return val_accuracy
 
 study = optuna.create_study(direction='maximize')
 study.optimize(objective, n_trials=80)
