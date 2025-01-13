@@ -263,7 +263,18 @@ def evaluate_model(model, test_loader, criterion, task, test):
 task = int(sys.argv[1])
 
 
-def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size=8, learning_rate=0.00001, l2_lambda=1e-4):
+def train_model(
+    train_data, 
+    val_data, 
+    test_data, 
+    task, 
+    num_epochs=50, 
+    batch_size=8, 
+    learning_rate=0.00001, 
+    l2_lambda=1e-4,
+    patience=5,           # Number of epochs with no improvement to wait
+    min_delta=1e-4        # Minimum improvement to be considered as "progress"
+):
     # Unpack data
     train_idx, train_xyz, train_chiral, train_rot = train_data
     val_idx, val_xyz, val_chiral, val_rot = val_data
@@ -275,26 +286,26 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
     test_xyz = apply_normalization(test_xyz, min_val, max_val)
 
     train_labels_np = np.array(generate_label_array(train_idx, train_xyz, train_chiral, train_rot, task))
-    val_labels_np = np.array(generate_label_array(val_idx, val_xyz, val_chiral, val_rot, task))
-    test_labels_np = np.array(generate_label_array(test_idx, test_xyz, test_chiral, test_rot, task))
+    val_labels_np   = np.array(generate_label_array(val_idx,   val_xyz,   val_chiral,   val_rot,   task))
+    test_labels_np  = np.array(generate_label_array(test_idx,  test_xyz,  test_chiral,  test_rot,  task))
 
     # Convert to tensors
     train_tensor = torch.tensor(np.array(train_xyz), dtype=torch.float32)
-    val_tensor = torch.tensor(np.array(val_xyz), dtype=torch.float32)
-    test_tensor = torch.tensor(np.array(test_xyz), dtype=torch.float32)
+    val_tensor   = torch.tensor(np.array(val_xyz),   dtype=torch.float32)
+    test_tensor  = torch.tensor(np.array(test_xyz),  dtype=torch.float32)
 
-    
+    # For task != 2, labels are float; for task == 2, labels are long (classification w/ CrossEntropy)
     train_labels = torch.tensor(train_labels_np, dtype=torch.float32 if task != 2 else torch.long)
-    val_labels = torch.tensor(val_labels_np, dtype=torch.float32 if task != 2 else torch.long)
-    test_labels = torch.tensor(test_labels_np, dtype=torch.float32 if task != 2 else torch.long)
+    val_labels   = torch.tensor(val_labels_np,   dtype=torch.float32 if task != 2 else torch.long)
+    test_labels  = torch.tensor(test_labels_np,  dtype=torch.float32 if task != 2 else torch.long)
 
     train_dataset = TensorDataset(train_tensor, train_labels)
-    val_dataset = TensorDataset(val_tensor, val_labels)
-    test_dataset = TensorDataset(test_tensor, test_labels)
+    val_dataset   = TensorDataset(val_tensor,   val_labels)
+    test_dataset  = TensorDataset(test_tensor,  test_labels)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    val_loader   = DataLoader(val_dataset,   batch_size=batch_size, shuffle=False)
+    test_loader  = DataLoader(test_dataset,  batch_size=batch_size, shuffle=False)
 
     # Determine output size
     output_size = 5 if task == 2 else 1
@@ -307,45 +318,68 @@ def train_model(train_data, val_data, test_data, task, num_epochs=50, batch_size
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+    # === Early Stopping Setup ===
+    best_val_loss = float('inf')  # Initialize with a large value
+    patience_counter = 0          # Counts how many epochs with no improvement
+
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
+
         for i, (inputs, labels) in enumerate(train_loader):
             inputs, labels = inputs.to(device), labels.to(device)
-
-            # Reshape for CNN
-            inputs = inputs.unsqueeze(1) # (N,1,27,8)
+            inputs = inputs.unsqueeze(1)  # Reshape for CNN
 
             optimizer.zero_grad()
             outputs = model(inputs)
-            
+
             if task == 2:
                 loss = criterion(outputs, labels)
             else:
                 outputs = torch.sigmoid(outputs)
                 loss = criterion(outputs.squeeze(1), labels)
-            
+
             # Add weight decay
             loss = loss + weight_decay(model, l2_lambda, device)
-            
+
             loss.backward()
             optimizer.step()
-
             running_loss += loss.item()
 
-        # Evaluation on validation data
-        if epoch % 5 == 0:
-            val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(model, val_loader, criterion, task, test=False)
-            test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(model, test_loader, criterion, task, test=True)
-            print(f"{epoch} Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%, Precision: {test_prec:.4f}, Recall: {test_recall:.4f}, F1: {test_f1:.4f}")
-        else:
-            val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(model, val_loader, criterion, task, test=False)
+        # Evaluate on validation set
+        val_loss, val_acc, val_prec, val_recall, val_f1 = evaluate_model(
+            model, val_loader, criterion, task, test=False
+        )
 
-        print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}, Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}")
+        # Print progress
+        print(f"Epoch [{epoch+1}/{num_epochs}], "
+              f"Train Loss: {running_loss/len(train_loader):.4f}, "
+              f"Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}, Val Acc: {val_acc:.2f}%")
+
+        # === Check improvement for early stopping ===
+        # Compare new val_loss with the previous best_val_loss
+        if val_loss < best_val_loss - min_delta:
+            # There's an improvement
+            best_val_loss = val_loss
+            patience_counter = 0
+        else:
+            # No meaningful improvement
+            patience_counter += 1
+
+        if patience_counter >= patience:
+            print(f"Early stopping triggered. No improvement in validation loss for {patience} epochs.")
+            break
 
     # Final Test Evaluation
-    test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(model, test_loader, criterion, task, test=True)
-    print(f"Final Test Loss: {test_loss:.4f}, Accuracy: {test_acc:.2f}%, Precision: {test_prec:.4f}, Recall: {test_recall:.4f}, F1: {test_f1:.4f}")
+    test_loss, test_acc, test_prec, test_recall, test_f1 = evaluate_model(
+        model, test_loader, criterion, task, test=True
+    )
+    print(f"Final Test Loss: {test_loss:.4f}, "
+          f"Accuracy: {test_acc:.2f}%, "
+          f"Precision: {test_prec:.4f}, "
+          f"Recall: {test_recall:.4f}, "
+          f"F1: {test_f1:.4f}")
+
     return model
 
 
